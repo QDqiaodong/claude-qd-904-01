@@ -41,7 +41,7 @@
         </el-form-item>
         <el-form-item label="来源槽">
           <el-select v-model="createForm.sourceTroughNo" clearable style="width: 140px">
-            <el-option v-for="t in troughs" :key="t.troughNo" :label="t.troughNo" :value="t.troughNo" />
+            <el-option v-for="t in troughs" :key="t.id" :label="t.troughNo" :value="t.troughNo" />
           </el-select>
         </el-form-item>
         <el-form-item label="制茶师傅">

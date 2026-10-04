@@ -29,10 +29,16 @@ CREATE TABLE IF NOT EXISTS leaf_intake (
     KEY idx_intake_supplier (supplier_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='鲜叶进厂验收单';
 
--- ---------------- 2. 摊青槽 ----------------
-CREATE TABLE IF NOT EXISTS withering_trough (
+-- ---------------- 2. 摊青履历（每轮摊青一条，槽号可复用） ----------------
+-- 槽号只是业务编号：WITHERING/READY 为当前占用，下槽置 DONE 后槽号释放、可承接下一批鲜叶；
+-- DONE 记录作为历史履历永久保留、可追溯，不参与当前槽数与达标率统计。
+-- active_key 为存储生成列：占用中（非 DONE）时等于槽号，下槽后置 NULL。
+-- 配合唯一索引 uk_active_trough，从数据库层保证一个槽号至多一条当前占用
+-- （两人同时用同一槽号开槽时只有一人成功）。
+CREATE TABLE IF NOT EXISTS withering_record (
     id                BIGINT       NOT NULL AUTO_INCREMENT,
-    trough_no         VARCHAR(16)  NOT NULL COMMENT '槽号',
+    trough_no         VARCHAR(16)  NOT NULL COMMENT '槽号（各轮摊青复用）',
+    round_no          INT          NOT NULL COMMENT '该槽号第几轮摊青，从 1 起',
     intake_no         VARCHAR(32)           COMMENT '关联进厂单号',
     batch_no          VARCHAR(32)           COMMENT '关联工单批次号',
     tea_type          VARCHAR(16)           COMMENT '茶类',
@@ -44,11 +50,19 @@ CREATE TABLE IF NOT EXISTS withering_trough (
     current_loss_pct  DECIMAL(5,2)          COMMENT '当前失水率 %',
     target_loss_pct   DECIMAL(5,2)          COMMENT '目标失水率 %',
     leaf_weight_kg    DECIMAL(10,2)         COMMENT '在槽鲜叶重量 kg',
-    status            VARCHAR(16)           COMMENT 'WITHERING / READY / DONE',
-    updated_at        DATETIME              COMMENT '更新时间',
+    status            VARCHAR(16)           COMMENT 'WITHERING / READY：当前占用；DONE：已下槽（历史履历）',
+    active_key        VARCHAR(16) GENERATED ALWAYS AS (CASE WHEN status IN ('WITHERING','READY') THEN trough_no ELSE NULL END) STORED COMMENT '当前占用标记',
+    created_at        DATETIME              COMMENT '开槽时间',
+    updated_at        DATETIME              COMMENT '最近登记时间',
+    released_at       DATETIME              COMMENT '下槽时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_trough_no (trough_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='摊青槽';
+    UNIQUE KEY uk_active_trough (active_key),
+    UNIQUE KEY uk_trough_round (trough_no, round_no),
+    KEY idx_wr_trough_round (trough_no, round_no),
+    KEY idx_wr_status (status),
+    KEY idx_wr_batch (batch_no),
+    KEY idx_wr_intake (intake_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='摊青履历（每轮一条，槽号下槽后可复用）';
 
 -- ---------------- 3. 制茶工单 ----------------
 CREATE TABLE IF NOT EXISTS tea_process_order (
@@ -267,39 +281,49 @@ INSERT INTO leaf_intake (intake_no, supplier_name, plot_code, pick_date, leaf_gr
  268.90, 80.10, 7.20, '杨质检', 20.30, 7.55, '含水量 80.10% 超上限 78%；杂质率 7.20% 超上限 5%',
  248.60, 52.00, 12927.20, 'DEDUCTED', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR);
 
--- ---------------- 摊青槽（8 槽） ----------------
-INSERT INTO withering_trough (trough_no, intake_no, batch_no, tea_type, wither_method, leaf_thickness_cm,
-                              wither_hours, temp_c, humidity_pct, current_loss_pct, target_loss_pct,
-                              leaf_weight_kg, status, updated_at) VALUES
-('TQ-01', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-002'),
+-- ---------------- 摊青履历（6 条当前占用 + 3 条历史完成；TQ-01 演示槽号复用：第 1 轮已下槽、第 2 轮在槽） ----------------
+INSERT INTO withering_record (trough_no, round_no, intake_no, batch_no, tea_type, wither_method, leaf_thickness_cm,
+                             wither_hours, temp_c, humidity_pct, current_loss_pct, target_loss_pct,
+                             leaf_weight_kg, status, created_at, updated_at, released_at) VALUES
+-- TQ-01 第 1 轮：上一批绿茶已达标下槽（历史完成，履历保留）
+('TQ-01', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-002'),
  CONCAT('PC-GREEN-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
- 'GREEN', '室内萎凋', 3.0, 8.5, 24.0, 68.0, 33.50, 32.00, 180.00, 'READY',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 MINUTE),
-('TQ-02', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-006'), NULL,
+ 'GREEN', '室内萎凋', 3.0, 9.0, 24.0, 68.0, 33.50, 32.00, 180.00, 'DONE',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 10 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR),
+-- TQ-01 第 2 轮：槽号复用，新一批鲜叶正在摊青
+('TQ-01', 2, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'), NULL,
+ 'GREEN', '室内萎凋', 3.0, 2.0, 24.5, 67.0, 12.40, 32.00, 128.00, 'WITHERING',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 2 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 10 MINUTE, NULL),
+('TQ-02', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-006'), NULL,
  'GREEN', '室内萎凋', 4.5, 6.0, 23.5, 70.0, 27.80, 32.00, 210.00, 'WITHERING',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 MINUTE),
-('TQ-03', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-007'),
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 MINUTE, NULL),
+-- TQ-03 第 1 轮：红茶已达标下槽（历史完成）
+('TQ-03', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-007'),
  CONCAT('PC-BLACK-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
- 'RED', '日光晒青', 2.5, 10.0, 28.0, 62.0, 38.60, 38.00, 195.00, 'READY',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 40 MINUTE),
-('TQ-04', NULL, NULL,
+ 'RED', '日光晒青', 2.5, 10.0, 28.0, 62.0, 38.60, 38.00, 195.00, 'DONE',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 12 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 7 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 7 HOUR),
+('TQ-04', 1, NULL, NULL,
  'RED', '室内萎凋', 5.0, 7.5, 25.0, 66.0, 31.20, 38.00, 240.00, 'WITHERING',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE),
-('TQ-05', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-008'),
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE, NULL),
+('TQ-05', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-008'),
  CONCAT('PC-OOLONG-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'OOLONG', '日光晒青', 2.0, 4.5, 30.5, 58.0, 26.40, 26.00, 150.00, 'READY',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 55 MINUTE),
-('TQ-06', NULL, NULL,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 5 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 55 MINUTE, NULL),
+('TQ-06', 1, NULL, NULL,
  'OOLONG', '室内萎凋', 3.5, 3.0, 26.0, 64.0, 19.80, 26.00, 160.00, 'WITHERING',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 15 MINUTE),
-('TQ-07', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-005'),
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 15 MINUTE, NULL),
+-- TQ-07 第 1 轮：白茶已达标下槽（历史完成）
+('TQ-07', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-005'),
  CONCAT('PC-WHITE-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
- 'WHITE', '室内萎凋', 1.5, 24.0, 22.0, 72.0, 45.20, 45.00, 120.00, 'READY',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 MINUTE),
-('TQ-08', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-010'),
+ 'WHITE', '室内萎凋', 1.5, 24.0, 22.0, 72.0, 45.20, 45.00, 120.00, 'DONE',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 26 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 13 HOUR,
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 13 HOUR),
+('TQ-08', 1, CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-010'),
  CONCAT('PC-PUER-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'PUER', '室内萎凋', 6.0, 2.5, 27.5, 60.0, 9.40, 12.00, 260.00, 'WITHERING',
- UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 10 MINUTE);
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 4 HOUR, UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 10 MINUTE, NULL);
 
 -- ---------------- 制茶工单（6 张） ----------------
 INSERT INTO tea_process_order (batch_no, tea_type, process_seq, current_step, current_step_index,

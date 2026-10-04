@@ -36,7 +36,7 @@
 
         <div class="tf-stat" style="margin-top: 10px; line-height: 1.9">
           今日进厂 <b>{{ dash.intakeCount }}</b> 车 · 净重 <b>{{ dash.intakeNetWeightKg }}</b> kg<br />
-          摊青 <b>{{ dash.witheringCount }}</b> 槽（达标 <b>{{ dash.readyTroughCount }}</b>）<br />
+          摊青 <b>{{ dash.witheringCount }}</b> 槽（达标 <b>{{ dash.readyTroughCount }}</b> · 累计下槽 <b>{{ dash.doneTroughCount }}</b>）<br />
           在制 <b>{{ dash.processingOrderCount }}</b> 批 · 完成 <b>{{ dash.doneOrderCount }}</b> 批<br />
           设备运行 <b>{{ dash.runningEquipmentCount }}</b> 台 · 故障 <b>{{ dash.faultEquipmentCount }}</b> 台
         </div>
@@ -89,7 +89,7 @@ const nodes = [
 ]
 
 const teaType = ref('GREEN')
-const dash = ref({ intakeCount: 0, intakeNetWeightKg: 0, witheringCount: 0, readyTroughCount: 0, processingOrderCount: 0, doneOrderCount: 0, runningEquipmentCount: 0, faultEquipmentCount: 0 })
+const dash = ref({ intakeCount: 0, intakeNetWeightKg: 0, witheringCount: 0, readyTroughCount: 0, doneTroughCount: 0, processingOrderCount: 0, doneOrderCount: 0, runningEquipmentCount: 0, faultEquipmentCount: 0 })
 
 const route = computed(() => router.currentRoute.value)
 

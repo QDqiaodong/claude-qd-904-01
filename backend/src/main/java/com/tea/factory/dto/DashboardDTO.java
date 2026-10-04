@@ -11,6 +11,8 @@ public class DashboardDTO {
     private java.math.BigDecimal intakeNetWeightKg;
     private long witheringCount;
     private long readyTroughCount;
+    /** 累计已下槽轮次（历史完成，不计入当前占用/达标槽数） */
+    private long doneTroughCount;
     private long processingOrderCount;
     private long doneOrderCount;
     private long runningEquipmentCount;
@@ -51,6 +53,14 @@ public class DashboardDTO {
 
     public void setReadyTroughCount(long readyTroughCount) {
         this.readyTroughCount = readyTroughCount;
+    }
+
+    public long getDoneTroughCount() {
+        return doneTroughCount;
+    }
+
+    public void setDoneTroughCount(long doneTroughCount) {
+        this.doneTroughCount = doneTroughCount;
     }
 
     public long getProcessingOrderCount() {

@@ -22,7 +22,11 @@ export const intakeApi = {
 }
 
 export const witheringApi = {
-  list: () => http.get('/withering'),
+  /** 看板：{ active: 当前占用[], history: 已下槽履历[] } */
+  board: () => http.get('/withering'),
+  active: () => http.get('/withering/active'),
+  history: () => http.get('/withering/history'),
+  troughHistory: (troughNo) => http.get(`/withering/trough/${troughNo}/history`),
   ready: () => http.get('/withering/ready'),
   open: (data) => http.post('/withering', data),
   log: (troughNo, data) => http.put(`/withering/${troughNo}/log`, data),

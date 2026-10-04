@@ -17,7 +17,7 @@ import com.tea.factory.repository.FinishedProductRepository;
 import com.tea.factory.repository.LeafIntakeRepository;
 import com.tea.factory.repository.TeaEvaluationRepository;
 import com.tea.factory.repository.TeaProcessOrderRepository;
-import com.tea.factory.repository.WitheringTroughRepository;
+import com.tea.factory.repository.WitheringRecordRepository;
 
 /**
  * 工序盘概览统计：进厂、摊青、在制、设备、成品与三项 JPQL 汇总。
@@ -29,7 +29,7 @@ public class StatsService {
     private static final String CACHE_KEY = "tea-factory:dashboard:version";
 
     private final LeafIntakeRepository intakeRepository;
-    private final WitheringTroughRepository troughRepository;
+    private final WitheringRecordRepository troughRepository;
     private final TeaProcessOrderRepository orderRepository;
     private final EquipmentRepository equipmentRepository;
     private final DryingRoomRepository dryingRoomRepository;
@@ -38,7 +38,7 @@ public class StatsService {
     private final StringRedisTemplate redisTemplate;
 
     public StatsService(LeafIntakeRepository intakeRepository,
-            WitheringTroughRepository troughRepository,
+            WitheringRecordRepository troughRepository,
             TeaProcessOrderRepository orderRepository,
             EquipmentRepository equipmentRepository,
             DryingRoomRepository dryingRoomRepository,
@@ -62,8 +62,10 @@ public class StatsService {
         dto.setIntakeNetWeightKg(sum(intakeRepository.findAll().stream()
                 .map(item -> item.getNetWeightKg() == null ? BigDecimal.ZERO : item.getNetWeightKg())
                 .toList()));
-        dto.setWitheringCount(troughRepository.count());
-        dto.setReadyTroughCount(troughRepository.findByStatusOrderByTroughNoAsc("READY").size());
+        // 摊青口径：当前占用（摊青中 + 可杀青）才算「在槽」；已下槽只计入累计完成，不进当前达标槽数
+        dto.setWitheringCount(troughRepository.countByStatusIn(List.of("WITHERING", "READY")));
+        dto.setReadyTroughCount(troughRepository.countByStatus("READY"));
+        dto.setDoneTroughCount(troughRepository.countByStatus("DONE"));
         dto.setProcessingOrderCount(orderRepository.findByStatusOrderByCreatedAtDesc("PROCESSING").size());
         dto.setDoneOrderCount(orderRepository.findByStatusOrderByCreatedAtDesc("DONE").size());
         dto.setRunningEquipmentCount(equipmentRepository.findByStatusOrderByEquipCodeAsc("RUNNING").size());
