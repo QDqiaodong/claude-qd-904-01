@@ -12,7 +12,9 @@ import jakarta.persistence.Table;
 import lombok.Data;
 
 /**
- * 摊青槽：摊青 / 萎凋环节的在槽记录。
+ * 摊青槽批次履历：每轮摊青一条记录（开槽新增、下槽转 DONE）。
+ * 物理槽号 troughNo 可反复承接新批次；同一槽号至多一条在槽（WITHERING / READY）记录，
+ * 由数据库 active_no 唯一索引兜底；DONE 记录作为历史保留，可按槽号 / 批次追溯。
  */
 @Data
 @Entity
@@ -24,8 +26,8 @@ public class WitheringTrough {
     @Column(name = "id")
     private Long id;
 
-    /** 槽号，如 TQ-01 */
-    @Column(name = "trough_no", nullable = false, length = 16, unique = true)
+    /** 槽号，如 TQ-01（物理槽位，可被多个历史批次复用；唯一占用由 active_no 索引保证） */
+    @Column(name = "trough_no", nullable = false, length = 16)
     private String troughNo;
 
     /** 关联鲜叶进厂单 */
@@ -67,13 +69,21 @@ public class WitheringTrough {
     @Column(name = "target_loss_pct", precision = 5, scale = 2)
     private BigDecimal targetLossPct;
 
-    /** WITHERING / READY / DONE */
+    /** WITHERING 摊青中 / READY 可杀青 / DONE 已下槽（历史） */
     @Column(name = "status", length = 16)
     private String status;
 
     /** 在槽鲜叶重量 kg */
     @Column(name = "leaf_weight_kg", precision = 10, scale = 2)
     private BigDecimal leafWeightKg;
+
+    /** 开槽时间（本轮摊青开始） */
+    @Column(name = "opened_at")
+    private LocalDateTime openedAt;
+
+    /** 下槽时间（达标放行后写入，NULL 表示仍在槽） */
+    @Column(name = "released_at")
+    private LocalDateTime releasedAt;
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;

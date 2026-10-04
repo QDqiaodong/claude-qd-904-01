@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS leaf_intake (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='鲜叶进厂验收单';
 
 -- ---------------- 2. 摊青槽 ----------------
+-- 每轮摊青一条独立记录：开槽 INSERT、下槽 UPDATE 状态；物理槽号可反复承接新批次。
+-- active_no 为存储生成列：在槽（WITHERING / READY）时等于 trough_no，下槽后置 NULL，
+-- 配合唯一索引 uk_trough_active，从数据库层保证一个槽号至多只有一条在槽记录
+-- （两人同时用同一槽号开槽，只有一人成功）；历史完成行不再占用槽号。
 CREATE TABLE IF NOT EXISTS withering_trough (
     id                BIGINT       NOT NULL AUTO_INCREMENT,
     trough_no         VARCHAR(16)  NOT NULL COMMENT '槽号',
@@ -44,11 +48,16 @@ CREATE TABLE IF NOT EXISTS withering_trough (
     current_loss_pct  DECIMAL(5,2)          COMMENT '当前失水率 %',
     target_loss_pct   DECIMAL(5,2)          COMMENT '目标失水率 %',
     leaf_weight_kg    DECIMAL(10,2)         COMMENT '在槽鲜叶重量 kg',
-    status            VARCHAR(16)           COMMENT 'WITHERING / READY / DONE',
+    status            VARCHAR(16)  NOT NULL DEFAULT 'WITHERING' COMMENT 'WITHERING 摊青中 / READY 可杀青 / DONE 已下槽',
+    active_no         VARCHAR(16) GENERATED ALWAYS AS (CASE WHEN status IN ('WITHERING','READY') THEN trough_no ELSE NULL END) STORED COMMENT '在槽占用标记',
+    opened_at         DATETIME              COMMENT '开槽时间',
+    released_at       DATETIME              COMMENT '下槽时间',
     updated_at        DATETIME              COMMENT '更新时间',
     PRIMARY KEY (id),
-    UNIQUE KEY uk_trough_no (trough_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='摊青槽';
+    UNIQUE KEY uk_trough_active (active_no),
+    KEY idx_trough_no (trough_no, opened_at),
+    KEY idx_trough_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='摊青槽批次履历（每轮摊青一条）';
 
 -- ---------------- 3. 制茶工单 ----------------
 CREATE TABLE IF NOT EXISTS tea_process_order (
@@ -267,38 +276,46 @@ INSERT INTO leaf_intake (intake_no, supplier_name, plot_code, pick_date, leaf_gr
  268.90, 80.10, 7.20, '杨质检', 20.30, 7.55, '含水量 80.10% 超上限 78%；杂质率 7.20% 超上限 5%',
  248.60, 52.00, 12927.20, 'DEDUCTED', UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 1 HOUR);
 
--- ---------------- 摊青槽（8 槽） ----------------
+-- ---------------- 摊青槽（8 槽在槽记录） ----------------
 INSERT INTO withering_trough (trough_no, intake_no, batch_no, tea_type, wither_method, leaf_thickness_cm,
                               wither_hours, temp_c, humidity_pct, current_loss_pct, target_loss_pct,
-                              leaf_weight_kg, status, updated_at) VALUES
+                              leaf_weight_kg, status, opened_at, updated_at) VALUES
 ('TQ-01', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-002'),
  CONCAT('PC-GREEN-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'GREEN', '室内萎凋', 3.0, 8.5, 24.0, 68.0, 33.50, 32.00, 180.00, 'READY',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 30 MINUTE),
 ('TQ-02', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-006'), NULL,
  'GREEN', '室内萎凋', 4.5, 6.0, 23.5, 70.0, 27.80, 32.00, 210.00, 'WITHERING',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 8 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 25 MINUTE),
 ('TQ-03', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-007'),
  CONCAT('PC-BLACK-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'RED', '日光晒青', 2.5, 10.0, 28.0, 62.0, 38.60, 38.00, 195.00, 'READY',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 16 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 40 MINUTE),
 ('TQ-04', NULL, NULL,
  'RED', '室内萎凋', 5.0, 7.5, 25.0, 66.0, 31.20, 38.00, 240.00, 'WITHERING',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 7 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 20 MINUTE),
 ('TQ-05', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-008'),
  CONCAT('PC-OOLONG-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'OOLONG', '日光晒青', 2.0, 4.5, 30.5, 58.0, 26.40, 26.00, 150.00, 'READY',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 7 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 55 MINUTE),
 ('TQ-06', NULL, NULL,
  'OOLONG', '室内萎凋', 3.5, 3.0, 26.0, 64.0, 19.80, 26.00, 160.00, 'WITHERING',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 3 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 15 MINUTE),
 ('TQ-07', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-005'),
  CONCAT('PC-WHITE-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'WHITE', '室内萎凋', 1.5, 24.0, 22.0, 72.0, 45.20, 45.00, 120.00, 'READY',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 36 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 90 MINUTE),
 ('TQ-08', CONCAT('XY', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-010'),
  CONCAT('PC-PUER-', DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL 8 HOUR, '%Y%m%d'), '-001'),
  'PUER', '室内萎凋', 6.0, 2.5, 27.5, 60.0, 9.40, 12.00, 260.00, 'WITHERING',
+ UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 6 HOUR,
  UTC_TIMESTAMP() + INTERVAL 8 HOUR - INTERVAL 10 MINUTE);
 
 -- ---------------- 制茶工单（6 张） ----------------

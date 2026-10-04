@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.tea.factory.common.ApiResponse;
@@ -31,6 +32,12 @@ public class WitheringController {
     @GetMapping
     public ApiResponse<List<WitheringTrough>> list() {
         return ApiResponse.success(witheringService.list());
+    }
+
+    /** 历史完成（已下槽）批次履历；?troughNo=TQ-01 可只查某槽号的各轮履历 */
+    @GetMapping("/history")
+    public ApiResponse<List<WitheringTrough>> history(@RequestParam(required = false) String troughNo) {
+        return ApiResponse.success(witheringService.history(troughNo));
     }
 
     @GetMapping("/ready")

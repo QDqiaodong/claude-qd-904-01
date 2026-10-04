@@ -62,8 +62,9 @@ public class StatsService {
         dto.setIntakeNetWeightKg(sum(intakeRepository.findAll().stream()
                 .map(item -> item.getNetWeightKg() == null ? BigDecimal.ZERO : item.getNetWeightKg())
                 .toList()));
-        dto.setWitheringCount(troughRepository.count());
-        dto.setReadyTroughCount(troughRepository.findByStatusOrderByTroughNoAsc("READY").size());
+        // 只统计当前在槽占用：已下槽历史记录不计入槽数与达标槽数
+        dto.setWitheringCount(troughRepository.countByReleasedAtIsNull());
+        dto.setReadyTroughCount(troughRepository.findByStatusAndReleasedAtIsNullOrderByTroughNoAsc("READY").size());
         dto.setProcessingOrderCount(orderRepository.findByStatusOrderByCreatedAtDesc("PROCESSING").size());
         dto.setDoneOrderCount(orderRepository.findByStatusOrderByCreatedAtDesc("DONE").size());
         dto.setRunningEquipmentCount(equipmentRepository.findByStatusOrderByEquipCodeAsc("RUNNING").size());

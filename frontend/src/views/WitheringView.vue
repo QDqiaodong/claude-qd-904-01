@@ -44,13 +44,13 @@
       </el-form>
     </section>
 
-    <!-- ============ 摊青槽一排卡片 ============ -->
+    <!-- ============ 摊青槽一排卡片（仅当前在槽） ============ -->
     <div class="wt-rail">
       <div
         v-for="t in troughs"
-        :key="t.troughNo"
+        :key="t.id"
         class="wt-card"
-        :class="{ 'is-ready': t.status === 'READY', 'is-selected': selected === t.troughNo, 'is-done': t.status === 'DONE' }"
+        :class="{ 'is-ready': t.status === 'READY', 'is-selected': selected === t.id }"
         @click="selectCard(t)"
       >
         <div class="wt-card-head">
@@ -96,8 +96,38 @@
         <div v-if="t.status === 'READY'" class="wt-ready">可杀青</div>
         <div v-else class="wt-need">还差 {{ num(gap(t), 2) }}%</div>
       </div>
-      <div v-if="!troughs.length" class="tf-empty">暂无在槽摊青记录，先在上方登记一槽</div>
+      <div v-if="!troughs.length" class="tf-empty">暂无在槽摊青记录，先在上方登记一槽（已下槽槽号可直接复用）</div>
     </div>
+
+    <!-- ============ 历史完成批次履历 ============ -->
+    <section class="tf-card">
+      <div class="tf-card-title">
+        下槽批次履历
+        <small>历史完成记录保留可追溯，不计入当前占用与达标槽数</small>
+        <el-button link type="primary" size="small" style="float: right" @click="loadHistory">刷新</el-button>
+      </div>
+      <el-table :data="historyRows" size="small" stripe empty-text="暂无已下槽历史批次">
+        <el-table-column prop="troughNo" label="槽号" width="80" />
+        <el-table-column label="茶类" width="90">
+          <template #default="{ row }">{{ teaName(row.teaType) }}</template>
+        </el-table-column>
+        <el-table-column prop="witherMethod" label="摊青方式" width="100" />
+        <el-table-column prop="intakeNo" label="进厂单号" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="batchNo" label="工单批次" min-width="170" show-overflow-tooltip />
+        <el-table-column label="在槽 kg" width="90" align="right">
+          <template #default="{ row }">{{ num(row.leafWeightKg, 0) }}</template>
+        </el-table-column>
+        <el-table-column label="下槽失水率" width="100" align="right">
+          <template #default="{ row }">{{ num(row.currentLossPct, 2) }}%</template>
+        </el-table-column>
+        <el-table-column label="开槽时间" width="150">
+          <template #default="{ row }">{{ fmtTime(row.openedAt) }}</template>
+        </el-table-column>
+        <el-table-column label="下槽时间" width="150">
+          <template #default="{ row }">{{ fmtTime(row.releasedAt) }}</template>
+        </el-table-column>
+      </el-table>
+    </section>
 
     <!-- ============ 选中槽：登记 / 放行 ============ -->
     <section v-if="current" class="tf-card wt-detail">
@@ -182,8 +212,9 @@ const props = defineProps({
 })
 
 const troughs = ref([])
+const historyRows = ref([])
 const intakes = ref([])
-const selected = ref('')
+const selected = ref(null)
 const showOpen = ref(false)
 const opening = ref(false)
 const logging = ref(false)
@@ -211,7 +242,7 @@ const num = (v, d = 2) => (v === null || v === undefined ? '-' : Number(v).toFix
 const fmtTime = (s) => (s ? String(s).replace('T', ' ').slice(0, 16) : '-')
 const statusName = (s) => ({ WITHERING: '摊青中', READY: '可杀青', DONE: '已下槽' }[s] || s || '-')
 
-const current = computed(() => troughs.value.find((t) => t.troughNo === selected.value) || null)
+const current = computed(() => troughs.value.find((t) => t.id === selected.value) || null)
 
 /** 失水完成百分比 */
 function progress(t) {
@@ -255,13 +286,23 @@ async function load() {
   try {
     const res = await witheringApi.list()
     troughs.value = res && res.data ? res.data : []
-    if (!selected.value && troughs.value.length) selectCard(troughs.value[0])
-    else if (selected.value) {
-      const hit = troughs.value.find((t) => t.troughNo === selected.value)
+    if (selected.value == null && troughs.value.length) selectCard(troughs.value[0])
+    else if (selected.value != null) {
+      const hit = troughs.value.find((t) => t.id === selected.value)
       if (hit) fillLog(hit)
+      else selectCard(troughs.value[0] || null)
     }
   } catch (e) {
     ElMessage.error('加载摊青槽失败：' + e.message)
+  }
+}
+
+async function loadHistory() {
+  try {
+    const res = await witheringApi.history()
+    historyRows.value = res && res.data ? res.data : []
+  } catch (e) {
+    ElMessage.error('加载下槽履历失败：' + e.message)
   }
 }
 
@@ -275,7 +316,11 @@ async function loadIntakes() {
 }
 
 function selectCard(t) {
-  selected.value = t.troughNo
+  if (!t) {
+    selected.value = null
+    return
+  }
+  selected.value = t.id
   fillLog(t)
 }
 
@@ -307,7 +352,9 @@ async function openTrough() {
     showOpen.value = false
     openForm.troughNo = ''
     await load()
-    if (troughs.value.some((t) => t.troughNo === no)) selectCard(troughs.value.find((t) => t.troughNo === no))
+    await loadHistory()
+    const hit = troughs.value.find((t) => t.troughNo === no)
+    if (hit) selectCard(hit)
   } catch (e) {
     ElMessage.error(e.message || '开槽失败')
   } finally {
@@ -342,6 +389,7 @@ async function releaseCard() {
     const res = await witheringApi.release(current.value.troughNo)
     ElMessage.success(res && res.message ? res.message : '已下槽')
     await load()
+    await loadHistory()
   } catch (e) {
     ElMessage.error(e.message || '放行失败')
   } finally {
@@ -358,6 +406,7 @@ watch(
 
 onMounted(() => {
   load()
+  loadHistory()
   loadIntakes()
 })
 </script>
@@ -398,10 +447,6 @@ onMounted(() => {
 .wt-card.is-ready {
   background: linear-gradient(180deg, #eef5e6 0%, #ffffff 60%);
   border-color: #33691e;
-}
-
-.wt-card.is-done {
-  opacity: 0.62;
 }
 
 .wt-card-head {

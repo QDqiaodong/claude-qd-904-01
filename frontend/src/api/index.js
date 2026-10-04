@@ -23,6 +23,7 @@ export const intakeApi = {
 
 export const witheringApi = {
   list: () => http.get('/withering'),
+  history: (troughNo) => http.get('/withering/history', { params: troughNo ? { troughNo } : {} }),
   ready: () => http.get('/withering/ready'),
   open: (data) => http.post('/withering', data),
   log: (troughNo, data) => http.put(`/withering/${troughNo}/log`, data),

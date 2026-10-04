@@ -36,7 +36,7 @@
 
         <div class="tf-stat" style="margin-top: 10px; line-height: 1.9">
           今日进厂 <b>{{ dash.intakeCount }}</b> 车 · 净重 <b>{{ dash.intakeNetWeightKg }}</b> kg<br />
-          摊青 <b>{{ dash.witheringCount }}</b> 槽（达标 <b>{{ dash.readyTroughCount }}</b>）<br />
+          在槽 <b>{{ dash.witheringCount }}</b> 槽（达标可放行 <b>{{ dash.readyTroughCount }}</b>）<br />
           在制 <b>{{ dash.processingOrderCount }}</b> 批 · 完成 <b>{{ dash.doneOrderCount }}</b> 批<br />
           设备运行 <b>{{ dash.runningEquipmentCount }}</b> 台 · 故障 <b>{{ dash.faultEquipmentCount }}</b> 台
         </div>
